@@ -1,0 +1,455 @@
+---
+title: "Data Exploration"
+author: "Michael Green"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Load Packages and Data
+
+```{r entry}
+library(tidyverse)
+library(tableone)
+library(tidymodels)
+# loading raw NAMCS data which I converted to csv
+data_raw <- read.csv("Data/NAMCS2019.csv")
+
+# loading pdf file of 20 pages from NAMCS data documentation that listed the key for the different medical codes
+medcodes_raw <- read.csv("Data/NAMCS Drug Entry Codes.csv")
+
+#Making the variables interpretable
+data_clean <- data_raw %>%
+  select(Age = AGE, 
+         `Race and Ethnicity` = RACERETH, 
+         `Smoking History` = EVERTOBAC, 
+         `Major Reason for Visit` = MAJOR, 
+         `Primary Reason for Visit` = RFV1, 
+         `Secondary Reason for Visit` = RFV2, 
+         `Primary Care` = PRIMCARE, 
+         Hypertension = HTN, 
+         `Chronic Kidney Disease` = CKD, 
+         `Congestive Heart Failure` = CHF, 
+         `Diabetes Type 1` = DIABTYP1, 
+         `Diabetes Type 2` = DIABTYP2, 
+         Obesity = OBESITY, 
+         `Systolic Blood Pressure` = BPSYS, 
+         Medication = MED, 
+         `Number Medications` = NUMMED, 
+         `Time with Doctor` = TIMEMD, 
+         `Recommended for ED or ER` = ERADMHOS)
+
+#Telling RStudio to treat these continuous variables as numeric
+data_clean <- data_clean %>%
+  mutate(Age = as.numeric(Age),
+         `Number Medications` = as.numeric(`Number Medications`),
+         `Time with Doctor` = as.numeric(`Time with Doctor`),
+         `Systolic Blood Pressure` = as.numeric(`Systolic Blood Pressure`))
+
+#Reducing the amount of category options for reason for visi (originally above 80), then dropping unknown and blank values for Smoking History, Primary Care, and Medication variables
+data_clean <- data_clean %>%
+  filter(`Smoking History` != "Unknown") %>%
+  filter(!(`Primary Care` %in% c("Blank", "Unknown"))) %>%
+  filter(`Medication` != "Entire item blank") %>%
+  mutate(`Primary Reason for Visit` = if_else(`Primary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
+                                              `Primary Reason for Visit`, "other"),
+         `Secondary Reason for Visit` = if_else(`Secondary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
+                                                `Secondary Reason for Visit`, "other"))
+
+#Making the variables readable and removing excess space on observations
+medcodes_clean <- medcodes_raw %>%
+  select(Medication.ID, Medication.Name) %>%
+  rename(`Rx ID Number` = Medication.ID, `Rx Name` = Medication.Name) %>%
+  mutate(`Rx ID Number` = trimws(`Rx ID Number`),
+         `Rx Name` = trimws(`Rx Name`))
+
+#Telling RStudio to treat these continuous variables as numeric
+data_clean <- data_clean %>%
+  mutate(Age = as.numeric(Age),
+         `Number Medications` = as.numeric(`Number Medications`),
+         `Time with Doctor` = as.numeric(`Time with Doctor`),
+         `Systolic Blood Pressure` = as.numeric(`Systolic Blood Pressure`))
+
+#Reducing the amount of category options for reason for visi (originally above 80), dropping unknown and blank values for Smoking History, Primary Care, and Medication variables
+data_clean <- data_clean %>%
+  filter(`Smoking History` != "Unknown") %>%
+  filter(!(`Primary Care` %in% c("Blank", "Unknown"))) %>%
+  filter(`Medication` != "Entire item blank") %>%
+  mutate(`Primary Reason for Visit` = if_else(`Primary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
+                                              `Primary Reason for Visit`, "other"),
+         `Secondary Reason for Visit` = if_else(`Secondary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
+                                                `Secondary Reason for Visit`, "other"))
+
+#Making the variables readbable and removing excess space on observations
+medcodes_clean <- medcodes_raw %>%
+  select(Medication.ID, Medication.Name) %>%
+  rename(`Rx ID Number` = Medication.ID, `Rx Name` = Medication.Name) %>%
+  mutate(`Rx ID Number` = trimws(`Rx ID Number`),
+         `Rx Name` = trimws(`Rx Name`))
+
+```
+
+
+## Table 1 with 8250 Observations
+
+```{r entry 3}
+
+
+# Continuous and categorical variables
+cont_vars <- c("Age", "Number Medications", "Time with Doctor", "Systolic Blood Pressure")
+cat_vars <- c("Race and Ethnicity", "Smoking History", "Major Reason for Visit", "Primary Care",
+              "Hypertension", "Chronic Kidney Disease", "Congestive Heart Failure", 
+              "Diabetes Type 1", "Diabetes Type 2", "Obesity", "Medication", 
+              "Recommended for ED or ER")
+
+# Create the summary table
+my_table <- CreateTableOne(vars = c(cont_vars, cat_vars), data = data_clean, factorVars = cat_vars)
+
+# Print the table
+print(my_table, smd = TRUE)
+
+```
+
+## Creating data sets based on non-surgery related visits, and people with primary or secondary reason of visit as Hypertension or Blood pressure test
+
+```{r entry 4}
+
+data_nonsurgery <- data_clean %>%
+  filter(`Major Reason for Visit` %in% c("Chronic problem, routine",
+                                         "New problem (less than 3 mos. onset)",
+                                         "Chronic problem, flare-up",
+                                         "Preventive care"))
+data_htnvisits <- data_nonsurgery %>%
+  filter(`Primary Reason for Visit` %in% c("Hypertension", "Blood pressure test") |
+           `Secondary Reason for Visit` %in% c("Hypertension", "Blood pressure test"))
+
+data_htnyes <- data_nonsurgery %>%
+  filter(`Hypertension` %in% c("Yes")) 
+
+```
+
+```{r, include=FALSE}
+# Create a vector with old and new variable names
+old_med_names <- paste0("MED", 1:30)
+new_med_names <- paste0("Medication #", 1:30)
+old_ncmed_names <- paste0("NCMED", 1:30)
+new_ncmed_names <- paste0("New or Continued Medication #", 1:30)
+
+# Create new_medications dataset with renamed variables and additional variables
+data_meds <- data_raw %>%
+  select(all_of(c(old_med_names, old_ncmed_names)),
+         Age = AGE, 
+         `Race and Ethnicity` = RACERETH, 
+         `Smoking History` = EVERTOBAC, 
+         `Major Reason for Visit` = MAJOR, 
+         `Primary Reason for Visit` = RFV1, 
+         `Secondary Reason for Visit` = RFV2, 
+         `Primary Care` = PRIMCARE, 
+         Hypertension = HTN, 
+         `Chronic Kidney Disease` = CKD, 
+         `Congestive Heart Failure` = CHF, 
+         `Diabetes Type 1` = DIABTYP1, 
+         `Diabetes Type 2` = DIABTYP2, 
+         Obesity = OBESITY, 
+         `Systolic Blood Pressure` = BPSYS, 
+         Medication = MED, 
+         `Number Medications` = NUMMED, 
+         `Time with Doctor` = TIMEMD, 
+         `Recommended for ED or ER` = ERADMHOS) %>%
+  rename_with(~ifelse(. %in% old_med_names, new_med_names[match(., old_med_names)], 
+                       ifelse(. %in% old_ncmed_names, new_ncmed_names[match(., old_ncmed_names)], .))) %>%
+  mutate(Age = as.numeric(Age),
+         `Number Medications` = as.numeric(`Number Medications`),
+         `Time with Doctor` = as.numeric(`Time with Doctor`),
+         `Systolic Blood Pressure` = as.numeric(`Systolic Blood Pressure`)) %>%
+  filter(`Smoking History` != "Unknown") %>%
+  filter(!(`Primary Care` %in% c("Blank", "Unknown"))) %>%
+  filter(`Medication` != "Entire item blank") %>%
+  mutate(`Primary Reason for Visit` = if_else(`Primary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
+                                              `Primary Reason for Visit`, "other"),
+         `Secondary Reason for Visit` = if_else(`Secondary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
+                                                `Secondary Reason for Visit`, "other")) %>%
+  mutate(across(starts_with("New or Continued Medication"), ~na_if(., "Not applicable")),
+         across(starts_with("Medication #"), ~na_if(., -9)))
+
+```
+
+## Assembling the new medication dataset with names
+
+There are over 1,200 medications (generic and non-generic), with unique identifying numbers in the NAMCS data documentation. The code below shows how I replaced the names in an excel spreadsheet I generated from a 20 page pdf, with the codes that were present in the raw NAMCS data.
+
+```{r}
+# Create a named vector for the replacements
+replacement_vector <- medcodes_clean$`Rx Name`
+names(replacement_vector) <- medcodes_clean$`Rx ID Number`
+
+# Replace the values in the medication columns
+data_meds_names <- data_meds %>%
+  mutate_at(
+    vars(starts_with("Medication #")),
+    list(~ replacement_vector[.])
+  )
+
+# Add the "Total New Medications" and "Total Continued Medications" variables
+data_meds_names <- data_meds_names %>%
+  rowwise() %>%
+  mutate(
+    Total_New_Medications = sum(c_across(starts_with("New or Continued Medication")) == "New", na.rm = TRUE),
+    Total_Continued_Medications = sum(c_across(starts_with("New or Continued Medication")) == "Continued", na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+data_meds_names <- data_meds_names %>%
+  mutate(Total_New_Medications = as.numeric( Total_New_Medications),
+         Total_Continued_Medications = as.numeric(Total_Continued_Medications))
+
+data_htnyes_mednames <- data_meds_names %>%
+  filter(`Major Reason for Visit` %in% c("Chronic problem, routine",
+                                         "New problem (less than 3 mos. onset)",
+                                         "Chronic problem, flare-up",
+                                         "Preventive care")) %>%
+  filter(`Hypertension` %in% c("Yes"))
+
+```
+
+## Frequencies of Medications across dataset
+
+```{r}
+# Reshape the dataset
+meds_long <- data_htnyes_mednames %>%
+  pivot_longer(cols = starts_with("Medication"),
+               names_to = "Medication_Variable",
+               values_to = "Medication_Name")%>%
+    drop_na(Medication_Name)
+
+medication_counts <- meds_long %>%
+  filter(Medication_Name != "At least one medication was reported" & Medication_Name != "No medications were reported") %>%
+  mutate(Medication_Name = str_to_title(str_to_lower(Medication_Name))) %>%
+  group_by(Medication_Name) %>%
+  summarize(Total_Frequency = n(), .groups = 'drop') %>%
+  rename(Medication = Medication_Name)
+
+```
+
+
+## Frequencies of Medications across dataset
+
+```{r}
+# Reshape the dataset
+meds_long <- data_htnyes_mednames %>%
+  pivot_longer(cols = starts_with("Medication"),
+               names_to = "Medication_Variable",
+               values_to = "Medication_Name")%>%
+    drop_na(Medication_Name)
+
+medication_counts <- meds_long %>%
+  filter(Medication_Name != "At least one medication was reported" & Medication_Name != "No medications were reported") %>%
+  mutate(Medication_Name = str_to_title(str_to_lower(Medication_Name))) %>%
+  group_by(Medication_Name) %>%
+  summarize(Total_Frequency = n(), .groups = 'drop') %>%
+  rename(Medication = Medication_Name)
+
+```
+
+```{r, include=FALSE}
+# Arrange the dataset in descending order based on frequency
+medication_counts <- medication_counts %>%
+  arrange(desc(Total_Frequency))
+
+# Select the top 20 medicines
+top_20_medicines <- medication_counts %>%
+  slice(1:20)
+
+# Calculate the sum of frequencies for the remaining medicines
+other_medicines_frequency <- sum(medication_counts$Total_Frequency[21:nrow(medication_counts)])
+
+# Create a data frame for the "other" category
+other_category <- data.frame(Medication = "Other", Total_Frequency = other_medicines_frequency)
+
+# Combine the top 20 medicines with the "other" category
+top20_medication_counts <- rbind(top_20_medicines, other_category)
+
+# View the final dataset
+print(top20_medication_counts)
+
+total_sum <- sum(top20_medication_counts$Total_Frequency[1:20])
+
+# Add a new column with the percentage for each count
+top20_medication_counts$Percentage <- (top20_medication_counts$Total_Frequency / total_sum) * 100
+
+# Order Medication by Percentage and create a factor with ordered levels
+top20_medication_counts$Ordered_Medication <- factor(top20_medication_counts$Medication,
+                                                      levels = top20_medication_counts$Medication[order(-top20_medication_counts$Percentage)])
+
+my_colors <- c("#5DA5DA", "#FAA43A", "#60BD68", "#F17CB0", "#B2912F", 
+               "#B276B2", "#DECF3F", "#F15854", "#4D4D4D", "#9F9F9F",
+               "#B8E186", "#FFAFAF", "#AEC7E8", "#FFB347", "#D7B5DC",
+               "#C7C7C7", "#E377C2", "#7F7F7F", "#66C2A5", "#FC8D62")
+
+bar_graph <-ggplot(top20_medication_counts[1:20,], aes(x = Ordered_Medication, y = Total_Frequency, fill = Ordered_Medication)) +
+  geom_bar(width = 0.7, stat = "identity") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Top 20 Medication Counts",
+       x = "Medication",
+       y = "Total Frequency",
+       fill = "Medication") +
+  geom_text(aes(label=Total_Frequency), vjust=-0.3, size=3.5) +
+  scale_fill_manual(values = my_colors) +
+  guides(fill = guide_legend(title = NULL)) +
+  theme(panel.grid.major.y = element_line(color = "grey", linetype = "dashed"))
+
+
+
+```
+
+## Most frequent medicines used by people with hypertension
+
+```{r}
+#| echo: false
+print(bar_graph)
+
+```
+
+## Table 1 for those who have primary or secondary reason for visit that is related to htn
+
+```{r entry 5}
+
+# Continuous and categorical variables
+cont_vars <- c("Age", "Number Medications", "Time with Doctor", "Systolic Blood Pressure")
+cat_vars <- c("Race and Ethnicity", "Smoking History", "Major Reason for Visit", "Primary Care",
+              "Hypertension", "Chronic Kidney Disease", "Congestive Heart Failure", 
+              "Diabetes Type 1", "Diabetes Type 2", "Obesity", "Medication", 
+              "Recommended for ED or ER")
+
+# Create the summary table
+my_table <- CreateTableOne(vars = c(cont_vars, cat_vars), data = data_htnvisits, factorVars = cat_vars)
+
+# Print the table
+print(my_table, smd = TRUE)
+
+```
+
+## A few descriptive plots
+
+```{r entry 6}
+
+#age distribution by race and ethnicity
+ggplot(data_htnvisits, aes(x = `Race and Ethnicity`, y = Age, fill = `Race and Ethnicity`)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Age Distribution by Race and Ethnicity",
+       x = "Race and Ethnicity",
+       y = "Age")
+
+ggplot(data_htnvisits, aes(x = `Smoking History`, fill = `Smoking History`)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(title = "Frequency of Smoking History",
+       x = "Smoking History",
+       y = "Count")
+
+ggplot(data_htnvisits, aes(x = `Number Medications`, y = `Systolic Blood Pressure`)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  theme_minimal() +
+  labs(title = "Systolic Blood Pressure vs Number of Medications",
+       x = "Number of Medications",
+ get      y = "Systolic Blood Pressure")
+
+
+data_htnvisits %>%
+  ggplot(aes(x = `Race and Ethnicity`, y = `Number Medications`, fill = `Race and Ethnicity`)) +
+  geom_boxplot() +
+  labs(title = "Number of Medication by Race and Ethnicity")
+
+```
+
+## Modeling Data for those who had a primary/secondary visit reason as blood pressure test or HTN
+
+```{r entry 8}
+#Split the data into training and testing sets
+set.seed(123)
+data_split <- initial_split(data_htnvisits, prop = 0.75)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+#Create a recipe, had to add step nzv to remove variables with near-zero variance
+htnvisits_recipe <- recipe(`Number Medications` ~ ., data = train_data) %>%
+  step_nzv(all_predictors()) %>%
+  step_normalize(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+
+#Choose and set up a model
+linear_model <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
+
+#Create a workflow
+htnvisits_workflow <- workflow() %>%
+  add_recipe(htnvisits_recipe) %>%
+  add_model(linear_model)
+
+#cross validation
+set.seed(123)
+cv_results <- htnvisits_workflow %>%
+  fit_resamples(
+    resamples = bootstraps(train_data, times = 10),
+    metrics = metric_set(rmse, rsq)
+  )
+cv_results %>%
+  collect_metrics()
+
+#Visualize the performance of the model during cross-validation.
+cv_results %>%
+  collect_metrics() %>%
+  ggplot(aes(x = .metric, y = mean, ymin = mean - std_err, ymax = mean + std_err)) +
+  geom_pointrange() +
+  labs(title = "Cross-validation Metrics (with Standard Error)",
+       x = "Metric",
+       y = "Value") +
+  theme_minimal()
+
+#train the final model
+final_model <- htnvisits_workflow %>%
+  fit(data = train_data)
+
+#evaluate the model
+test_results <- final_model %>%
+  predict(test_data) %>%
+  bind_cols(test_data) %>%
+  metrics(truth = `Number Medications`, estimate = .pred)
+
+#Visualize the model's predicted values against the actual values for the test set.
+test_predictions <- final_model %>%
+  predict(test_data) %>%
+  bind_cols(test_data)
+
+ggplot(test_predictions, aes(x = `Number Medications`, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Actual vs. Predicted Number Medications",
+       x = "Actual Number Medications",
+       y = "Predicted Number Medications") +
+  theme_minimal()
+
+#interpret the model
+final_model %>%
+  pull_workflow_fit() %>%
+  tidy()
+
+```
+
+## Looking at the Prescriptions used for Dashboards
+
+```{r entry 7, eval=FALSE, include=FALSE}
+
+make a data set called "new medications" using the raw file
+include the variables "MED1, MED2, MED3...through MED30" do the same for "NCMED1, NCMED2... through NCMED30"
+```
+
+
