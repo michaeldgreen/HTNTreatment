@@ -138,7 +138,6 @@ new_med_names <- paste0("Medication #", 1:30)
 old_ncmed_names <- paste0("NCMED", 1:30)
 new_ncmed_names <- paste0("New or Continued Medication #", 1:30)
 
-# Create new_medications dataset with renamed variables and additional variables
 data_meds <- data_raw %>%
   select(all_of(c(old_med_names, old_ncmed_names)),
          Age = AGE, 
@@ -173,7 +172,11 @@ data_meds <- data_raw %>%
          `Secondary Reason for Visit` = if_else(`Secondary Reason for Visit` %in% c("Hypertension", "Blood pressure test"), 
                                                 `Secondary Reason for Visit`, "other")) %>%
   mutate(across(starts_with("New or Continued Medication"), ~na_if(., "Not applicable")),
-         across(starts_with("Medication #"), ~na_if(., -9)))
+         across(starts_with("Medication #"), ~na_if(., -9))) %>%
+  rowwise() %>% 
+  mutate("Number of New Medications" = sum(c_across(starts_with("New or Continued Medication")) == "New" & !is.na(c_across(starts_with("New or Continued Medication")))),
+         "Number of Continued Medications" = sum(c_across(starts_with("New or Continued Medication")) == "Continued" & !is.na(c_across(starts_with("New or Continued Medication")))))
+
 
 ```
 
@@ -206,6 +209,7 @@ data_meds_names <- data_meds_names %>%
   mutate(Total_New_Medications = as.numeric( Total_New_Medications),
          Total_Continued_Medications = as.numeric(Total_Continued_Medications))
 
+#creating dataset of individuals with hypertension
 data_htnyes_mednames <- data_meds_names %>%
   filter(`Major Reason for Visit` %in% c("Chronic problem, routine",
                                          "New problem (less than 3 mos. onset)",
@@ -213,19 +217,44 @@ data_htnyes_mednames <- data_meds_names %>%
                                          "Preventive care")) %>%
   filter(`Hypertension` %in% c("Yes"))
 
+#creating dataset of primary and secondary htn visits with medication names
+data_htnvisits_mednames <- data_meds_names %>%
+    filter(`Major Reason for Visit` %in% c("Chronic problem, routine",
+                                         "New problem (less than 3 mos. onset)",
+                                         "Chronic problem, flare-up",
+                                         "Preventive care")) %>%
+  filter(`Primary Reason for Visit` %in% c("Hypertension", "Blood pressure test") |
+           `Secondary Reason for Visit` %in% c("Hypertension", "Blood pressure test"))
 ```
 
 ## Frequencies of Medications across dataset
 
 ```{r}
 # Reshape the dataset
-meds_long <- data_htnyes_mednames %>%
+meds_long_htn <- data_htnyes_mednames %>%
   pivot_longer(cols = starts_with("Medication"),
                names_to = "Medication_Variable",
                values_to = "Medication_Name")%>%
     drop_na(Medication_Name)
 
-medication_counts <- meds_long %>%
+#count medications for htn 
+medication_counts_htn <- meds_long_htn %>%
+  filter(Medication_Name != "At least one medication was reported" & Medication_Name != "No medications were reported") %>%
+  mutate(Medication_Name = str_to_title(str_to_lower(Medication_Name))) %>%
+  group_by(Medication_Name) %>%
+  summarize(Total_Frequency = n(), .groups = 'drop') %>%
+  rename(Medication = Medication_Name)
+
+
+# Reshape the dataset
+meds_long_htnvisits <- data_htnyes_mednames %>%
+  pivot_longer(cols = starts_with("Medication"),
+               names_to = "Medication_Variable",
+               values_to = "Medication_Name")%>%
+    drop_na(Medication_Name)
+
+#count medications for htn visits
+medication_counts_htnvisits <- meds_long_htnvisits %>%
   filter(Medication_Name != "At least one medication was reported" & Medication_Name != "No medications were reported") %>%
   mutate(Medication_Name = str_to_title(str_to_lower(Medication_Name))) %>%
   group_by(Medication_Name) %>%
@@ -235,61 +264,43 @@ medication_counts <- meds_long %>%
 ```
 
 
-## Frequencies of Medications across dataset
-
-```{r}
-# Reshape the dataset
-meds_long <- data_htnyes_mednames %>%
-  pivot_longer(cols = starts_with("Medication"),
-               names_to = "Medication_Variable",
-               values_to = "Medication_Name")%>%
-    drop_na(Medication_Name)
-
-medication_counts <- meds_long %>%
-  filter(Medication_Name != "At least one medication was reported" & Medication_Name != "No medications were reported") %>%
-  mutate(Medication_Name = str_to_title(str_to_lower(Medication_Name))) %>%
-  group_by(Medication_Name) %>%
-  summarize(Total_Frequency = n(), .groups = 'drop') %>%
-  rename(Medication = Medication_Name)
-
-```
 
 ```{r, include=FALSE}
 # Arrange the dataset in descending order based on frequency
-medication_counts <- medication_counts %>%
+medication_counts_htn <- medication_counts_htn %>%
   arrange(desc(Total_Frequency))
 
 # Select the top 20 medicines
-top_20_medicines <- medication_counts %>%
+top_20_medicines_htn <- medication_counts_htn %>%
   slice(1:20)
 
 # Calculate the sum of frequencies for the remaining medicines
-other_medicines_frequency <- sum(medication_counts$Total_Frequency[21:nrow(medication_counts)])
+other_medicines_frequency_htn <- sum(medication_counts_htn$Total_Frequency[21:nrow(medication_counts_htn)])
 
 # Create a data frame for the "other" category
-other_category <- data.frame(Medication = "Other", Total_Frequency = other_medicines_frequency)
+other_category_htn <- data.frame(Medication = "Other", Total_Frequency = other_medicines_frequency_htn)
 
 # Combine the top 20 medicines with the "other" category
-top20_medication_counts <- rbind(top_20_medicines, other_category)
+top20_medication_counts_htn <- rbind(top_20_medicines_htn, other_category_htn)
 
 # View the final dataset
-print(top20_medication_counts)
+print(top20_medication_counts_htn)
 
-total_sum <- sum(top20_medication_counts$Total_Frequency[1:20])
+total_sum_htn <- sum(top20_medication_counts_htn$Total_Frequency[1:20])
 
 # Add a new column with the percentage for each count
-top20_medication_counts$Percentage <- (top20_medication_counts$Total_Frequency / total_sum) * 100
+top20_medication_counts_htn$Percentage <- (top20_medication_counts_htn$Total_Frequency / total_sum_htn) * 100
 
 # Order Medication by Percentage and create a factor with ordered levels
-top20_medication_counts$Ordered_Medication <- factor(top20_medication_counts$Medication,
-                                                      levels = top20_medication_counts$Medication[order(-top20_medication_counts$Percentage)])
+top20_medication_counts_htn$Ordered_Medication <- factor(top20_medication_counts_htn$Medication,
+                                                      levels = top20_medication_counts_htn$Medication[order(-top20_medication_counts_htn$Percentage)])
 
 my_colors <- c("#5DA5DA", "#FAA43A", "#60BD68", "#F17CB0", "#B2912F", 
                "#B276B2", "#DECF3F", "#F15854", "#4D4D4D", "#9F9F9F",
                "#B8E186", "#FFAFAF", "#AEC7E8", "#FFB347", "#D7B5DC",
                "#C7C7C7", "#E377C2", "#7F7F7F", "#66C2A5", "#FC8D62")
 
-bar_graph <-ggplot(top20_medication_counts[1:20,], aes(x = Ordered_Medication, y = Total_Frequency, fill = Ordered_Medication)) +
+bar_graph <-ggplot(top20_medication_counts_htn[1:20,], aes(x = Ordered_Medication, y = Total_Frequency, fill = Ordered_Medication)) +
   geom_bar(width = 0.7, stat = "identity") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
