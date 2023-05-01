@@ -313,8 +313,6 @@ bar_graph <-ggplot(top20_medication_counts_htn[1:20,], aes(x = Ordered_Medicatio
   guides(fill = guide_legend(title = NULL)) +
   theme(panel.grid.major.y = element_line(color = "grey", linetype = "dashed"))
 
-
-
 ```
 
 ## Most frequent medicines used by people with hypertension
@@ -356,21 +354,13 @@ ggplot(data_htnvisits, aes(x = `Race and Ethnicity`, y = Age, fill = `Race and E
        x = "Race and Ethnicity",
        y = "Age")
 
-ggplot(data_htnvisits, aes(x = `Smoking History`, fill = `Smoking History`)) +
-  geom_bar() +
-  theme_minimal() +
-  labs(title = "Frequency of Smoking History",
-       x = "Smoking History",
-       y = "Count")
-
 ggplot(data_htnvisits, aes(x = `Number Medications`, y = `Systolic Blood Pressure`)) +
   geom_point() +
   geom_smooth(method = "lm", se = TRUE, color = "red") +
   theme_minimal() +
   labs(title = "Systolic Blood Pressure vs Number of Medications",
        x = "Number of Medications",
- get      y = "Systolic Blood Pressure")
-
+       y = "Systolic Blood Pressure")
 
 data_htnvisits %>%
   ggplot(aes(x = `Race and Ethnicity`, y = `Number Medications`, fill = `Race and Ethnicity`)) +
@@ -464,3 +454,90 @@ include the variables "MED1, MED2, MED3...through MED30" do the same for "NCMED1
 ```
 
 
+```{r}
+
+
+# Summarize the dataset by "Race and Ethnicity" variable and calculate the total number of new medications for each group
+summary_data <- data_htnvisits_mednames %>%
+  group_by(`Race and Ethnicity`) %>%
+  summarise(Total_New_Medications = sum(Total_New_Medications, na.rm = TRUE))
+
+# Print the summary data
+print(summary_data)
+
+# Visualize the distribution of "Total_New_Medications" for each race/ethnicity category
+ggplot(data_htnvisits_mednames, aes(x = `Race and Ethnicity`, y = Total_New_Medications)) +
+  geom_boxplot(fill = "steelblue", outlier.color = "red", outlier.shape = 21) +
+  theme_minimal() +
+  labs(title = "Distribution of Total New Medications by Race and Ethnicity",
+       x = "Race and Ethnicity",
+       y = "Total New Medications")
+
+
+# Perform Kruskal-Wallis test
+kruskal_wallis_result <- kruskal.test(Total_New_Medications ~ `Race and Ethnicity`, data = data_htnvisits_mednames)
+print(kruskal_wallis_result)
+
+
+# Create a multiple linear regression model with the covariates
+linear_model <- lm(Total_New_Medications ~ `Race and Ethnicity` + `Primary Care` + `Chronic Kidney Disease` + `Diabetes Type 2` + Obesity + `Number Medications`, data = data_htnvisits_mednames)
+
+# Print the summary of the regression model
+summary(linear_model)
+
+# Check assumptions of the linear regression model (normality, homoscedasticity, etc.)
+# Install the 'gvlma' package if not already installed
+if (!require(gvlma)) {
+  install.packages('gvlma')
+}
+
+library(gvlma)
+
+# Perform Global Validation of Linear Models Assumptions (gvlma)
+gvlma_result <- gvlma(linear_model)
+summary(gvlma_result)
+
+
+# Create a multiple linear regression model with the covariates
+linear_model <- lm(Total_New_Medications ~ `Race and Ethnicity` + `Primary Care` + `Chronic Kidney Disease` + `Diabetes Type 2` + Obesity + `Number Medications`, data = data_htnvisits_mednames)
+
+# Create diagnostic plots
+par(mfrow = c(2, 2))
+plot(linear_model)
+
+# Alternatively, use ggplot2 to create diagnostic plots
+ggplot(data = data.frame(predicted = linear_model$fitted.values, residuals = linear_model$residuals)) +
+  geom_point(aes(x = predicted, y = residuals)) +
+  labs(title = "Residuals vs Fitted Values Plot",
+       x = "Fitted values",
+       y = "Residuals")
+
+ggplot(data = data.frame(standardized_residuals = rstandard(linear_model), fitted_values = linear_model$fitted.values)) +
+  geom_point(aes(x = fitted_values, y = standardized_residuals)) +
+  labs(title = "Standardized Residuals vs Fitted Values Plot",
+       x = "Fitted values",
+       y = "Standardized Residuals")
+
+ggplot(data = data.frame(studentized_residuals = rstudent(linear_model), leverage = hatvalues(linear_model))) +
+  geom_point(aes(x = leverage, y = studentized_residuals)) +
+  geom_hline(yintercept = c(-2, 2), linetype = "dashed") +
+  labs(title = "Studentized Residuals vs Leverage Plot",
+       x = "Leverage",
+       y = "Studentized Residuals")
+
+ggplot(data = data.frame(cooks_distance = cooks.distance(linear_model), row_num = 1:length(cooks.distance(linear_model)))) +
+  geom_point(aes(x = row_num, y = cooks_distance)) +
+  geom_hline(yintercept = 4/(length(linear_model$residuals) - length(linear_model$coefficients)), linetype = "dashed") +
+  labs(title = "Cook's Distance Plot",
+       x = "Observation Index",
+       y = "Cook's Distance")
+
+# You can also plot the relationship between the outcome variable and each covariate separately
+ggplot(data_htnvisits_mednames, aes(x = `Race and Ethnicity`, y = Total_New_Medications)) +
+  geom_boxplot() +
+  facet_wrap(~ `Primary Care`, scales = "free") +
+  theme_minimal()
+
+
+
+```
